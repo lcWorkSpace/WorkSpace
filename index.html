@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>电商运营看板</title>
+  <!-- Element UI & Vue 2 via CDN -->
+  <link rel="stylesheet" href="https://unpkg.com/element-ui/lib/theme-chalk/index.css" />
+  <style>
+    body { background:#f5f7fa; }
+    .toolbar { margin: 16px; }
+    .kpi-card .val { font-size: 26px; font-weight: 600; }
+    .kpi-card .sub { color:#909399; font-size: 12px; }
+    .kpi-card .trend { color:#67C23A; font-size: 12px; }
+    .kpi-card .trend.down { color:#F56C6C; }
+    .chart-card { height: 320px; }
+    .chart { width: 100%; height: 100%; }
+    .card-title { font-weight: 600; margin-bottom: 8px; }
+    .footer-note { text-align:center; color:#909399; padding: 8px 0 24px; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <!-- Top filters toolbar -->
+    <div class="toolbar">
+      <el-row :gutter="12" type="flex" align="middle">
+        <el-col :span="6">
+          <el-select v-model="filters.system" placeholder="操作系统" filterable size="small" style="width:100%">
+            <el-option v-for="item in systems" :key="item" :label="item" :value="item" />
+          </el-select>
+        </el-col>
+        <el-col :span="8">
+          <el-date-picker
+            v-model="filters.daterange"
+            type="daterange"
+            unlink-panels
+            start-placeholder="开始日期"
+            end-placeholder="结束日期"
+            size="small"
+            style="width:100%" />
+        </el-col>
+        <el-col :span="10" style="text-align:right">
+          <el-button-group>
+            <el-button size="small" @click="quick('today')">今日</el-button>
+            <el-button size="small" @click="quick('yesterday')">昨日</el-button>
+            <el-button size="small" @click="quick('7')">近7日</el-button>
+            <el-button size="small" @click="quick('14')">近14日</el-button>
+            <el-button size="small" @click="quick('30')">近30日</el-button>
+          </el-button-group>
+          <el-button type="primary" size="small" icon="el-icon-search" @click="query">查询</el-button>
+          <el-button size="small" icon="el-icon-refresh" @click="reset">重置</el-button>
+        </el-col>
+      </el-row>
+    </div>
+
+    <!-- KPI cards -->
+    <div style="padding: 0 16px;">
+      <el-row :gutter="16">
+        <el-col :sm="12" :md="8" :lg="4" v-for="kpi in kpis" :key="kpi.key">
+          <el-card shadow="never" class="kpi-card">
+            <div class="sub">{{ kpi.title }}</div>
+            <div class="val">¥ {{ kpi.value.toLocaleString() }}</div>
+            <div class="sub">
+              对比昨日
+              <span :class="['trend', kpi.trend<0?'down':'']">{{ (kpi.trend>0?'+':'') + kpi.trend }}%</span>
+            </div>
+          </el-card>
+        </el-col>
+      </el-row>
+    </div>
+
+    <!-- Charts grid -->
+    <div style="padding: 16px;">
+      <el-row :gutter="16">
+        <el-col :md="24" :lg="12">
+          <el-card shadow="never" class="chart-card">
+            <div class="card-title">GMV 趋势图</div>
+            <div ref="gmvLine" class="chart"></div>
+          </el-card>
+        </el-col>
+        <el-col :md="24" :lg="12">
+          <el-card shadow="never" class="chart-card">
+            <div class="card-title">订单&付费用户趋势图</div>
+            <div ref="userBar" class="chart"></div>
+          </el-card>
+        </el-col>
+      </el-row>
+
+      <el-row :gutter="16" style="margin-top:16px;">
+        <el-col :md="24" :lg="8">
+          <el-card shadow="never" class="chart-card" style="height: 300px;">
+            <div class="card-title">订单来源分布</div>
+            <div ref="sourcePie" class="chart"></div>
+          </el-card>
+        </el-col>
+        <el-col :md="24" :lg="16">
+          <el-card shadow="never" class="chart-card" style="height: 300px;">
+            <div class="card-title">热销商品</div>
+            <div ref="hotBar" class="chart"></div>
+          </el-card>
+        </el-col>
+      </el-row>
+    </div>
+
+    <div class="footer-note">示例数据仅供参考 · Vue2 + Element-UI + ECharts</div>
+  </div>
+
+  <script src="https://unpkg.com/vue@2.7.16/dist/vue.js"></script>
+  <script src="https://unpkg.com/element-ui/lib/index.js"></script>
+  <script src="https://unpkg.com/echarts@5.5.0/dist/echarts.min.js"></script>
+  <script>
+    new Vue({
+      el: '#app',
+      data: function () {
+        return {
+          systems: ['全部', 'iOS', 'Android', 'PC', 'H5', '小程序'],
+          filters: { system: '全部', daterange: [] },
+          kpis: [
+            { key: 'gmv_total', title: '订单总金额（总GMV）', value: 500000, trend: 5 },
+            { key: 'gmv', title: 'GMV', value: 50, trend: 5 },
+            { key: 'orders', title: '订单总数', value: 5000, trend: 5 },
+            { key: 'paid_orders', title: '已支付订单', value: 4900, trend: 5 },
+            { key: 'buyers', title: '下单人数', value: 50, trend: -5 },
+            { key: 'arpu', title: '客单价', value: 40, trend: 5 }
+          ],
+          charts: {}
+        };
+      },
+      mounted: function () {
+        this.$nextTick(function () {
+          this.initCharts();
+          window.addEventListener('resize', this.resizeCharts);
+        });
+      },
+      beforeDestroy: function () {
+        window.removeEventListener('resize', this.resizeCharts);
+      },
+      methods: {
+        quick: function (type) {
+          var end = new Date();
+          var start = new Date();
+          if (type === 'today') {
+            // same day
+          } else if (type === 'yesterday') {
+            start.setDate(start.getDate() - 1);
+            end.setDate(end.getDate() - 1);
+          } else {
+            var days = parseInt(type, 10);
+            start.setDate(start.getDate() - (days - 1));
+          }
+          this.filters.daterange = [start, end];
+        },
+        query: function () {
+          // mock query, regenerate charts data
+          this.updateCharts();
+          this.$message.success('已根据条件刷新数据（示例）');
+        },
+        reset: function () {
+          this.filters.system = '全部';
+          this.filters.daterange = [];
+          this.updateCharts();
+        },
+        initCharts: function () {
+          this.charts.gmvLine = echarts.init(this.$refs.gmvLine);
+          this.charts.userBar = echarts.init(this.$refs.userBar);
+          this.charts.sourcePie = echarts.init(this.$refs.sourcePie);
+          this.charts.hotBar = echarts.init(this.$refs.hotBar);
+          this.updateCharts();
+        },
+        resizeCharts: function () {
+          Object.keys(this.charts).forEach(function (k) { this.charts[k].resize(); }, this);
+        },
+        updateCharts: function () {
+          var days = ['7/1','7/3','7/5','7/7','7/9','7/11','7/13','7/15','7/17','7/19','7/21','7/23','7/25','7/27','7/29'];
+          var gmv = days.map(function (_, i) { return 50 + i * 2 + (i % 3) * 3; });
+
+          this.charts.gmvLine.setOption({
+            grid: { left: 40, right: 12, top: 30, bottom: 30 },
+            xAxis: { type: 'category', data: days, boundaryGap: false },
+            yAxis: { type: 'value' },
+            tooltip: { trigger: 'axis' },
+            series: [{ name: 'GMV', type: 'line', data: gmv, smooth: true, areaStyle: { opacity: 0.05 } }]
+          });
+
+          var orders = days.map(function (_, i) { return 20 + (i % 5) * 10; });
+          var payUsers = days.map(function (_, i) { return 10 + (i % 4) * 8; });
+          this.charts.userBar.setOption({
+            grid: { left: 40, right: 12, top: 30, bottom: 30 },
+            legend: { data: ['订单数', '付费用户'] },
+            tooltip: { trigger: 'axis' },
+            xAxis: { type: 'category', data: days },
+            yAxis: { type: 'value' },
+            series: [
+              { name: '订单数', type: 'bar', data: orders, itemStyle: { color: '#409EFF' } },
+              { name: '付费用户', type: 'bar', data: payUsers, itemStyle: { color: '#67C23A' } }
+            ]
+          });
+
+          this.charts.sourcePie.setOption({
+            tooltip: { trigger: 'item' },
+            legend: { bottom: 0 },
+            series: [{
+              name: '来源', type: 'pie', radius: ['35%','60%'],
+              data: [
+                { value: 1800, name: 'APP' },
+                { value: 600, name: 'PC' },
+                { value: 600, name: 'H5' }
+              ]
+            }]
+          });
+
+          var goods = ['商品A','商品B','商品C','商品D','商品E','商品F'];
+          var sales = [5000, 8000, 12500, 14256, 16000, 20000];
+          this.charts.hotBar.setOption({
+            grid: { left: 60, right: 12, top: 10, bottom: 40 },
+            xAxis: { type: 'category', data: goods },
+            yAxis: { type: 'value' },
+            tooltip: { trigger: 'axis' },
+            series: [{ type: 'bar', data: sales, itemStyle: { color: '#409EFF' }, label: { show: true, position: 'top', formatter: '¥{c}' } }]
+          });
+        }
+      }
+    });
+  </script>
+</body>
+</html>
+
